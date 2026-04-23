@@ -53,7 +53,7 @@ jobs:
         src\img2simg.exe --help || echo "Help not available"
     
     - name: Upload artifact
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: img2simg-windows
         path: src/img2simg.exe
