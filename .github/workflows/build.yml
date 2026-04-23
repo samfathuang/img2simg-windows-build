@@ -1,0 +1,72 @@
+name: Build img2simg.exe
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up MSYS2
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-zlib-devel
+    
+    - name: Create source files directory
+      shell: bash
+      run: mkdir -p src
+    
+    - name: Download AOSP source files
+      shell: bash
+      run: |
+        cd src
+        # Download img2simg.c
+        curl -s "https://android.googlesource.com/platform/system/core/+/main/libsparse/img2simg.c?format=text" | base64 -d > img2simg.c || curl -s -o img2simg.c "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/img2simg.c"
+        # Download sparse.c
+        curl -s "https://android.googlesource.com/platform/system/core/+/main/libsparse/sparse.c?format=text" | base64 -d > sparse.c || curl -s -o sparse.c "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse.c"
+        # Download sparse_crc32.c
+        curl -s "https://android.googlesource.com/platform/system/core/+/main/libsparse/sparse_crc32.c?format=text" | base64 -d > sparse_crc32.c || curl -s -o sparse_crc32.c "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse_crc32.c"
+        # Download header files
+        curl -s "https://android.googlesource.com/platform/system/core/+/main/libsparse/sparse.h?format=text" | base64 -d > sparse.h || curl -s -o sparse.h "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse.h"
+        curl -s "https://android.googlesource.com/platform/system/core/+/main/libsparse/sparse_err.h?format=text" | base64 -d > sparse_err.h || curl -s -o sparse_err.h "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse_err.h"
+        curl -s "https://android.googlesource.com/platform/system/core/+/main/libsparse/output_file.h?format=text" | base64 -d > output_file.h || curl -s -o output_file.h "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/output_file.h"
+    
+    - name: Compile img2simg.exe
+      shell: msys2 {0}
+      run: |
+        cd src
+        gcc -o img2simg.exe img2simg.c sparse.c sparse_crc32.c -lz
+        ls -lh img2simg.exe
+        file img2simg.exe
+    
+    - name: Test executable
+      shell: cmd
+      run: |
+        src\img2simg.exe --help || echo "Help not available"
+    
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: img2simg-windows
+        path: src/img2simg.exe
+        retention-days: 90
+    
+    - name: Create Release
+      if: success()
+      uses: softprops/action-gh-release@v1
+      with:
+        files: src/img2simg.exe
+        tag_name: v1.0.0-${{ github.run_number }}
+        body: |
+          Windows build of img2simg from AOSP
+          Built: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
