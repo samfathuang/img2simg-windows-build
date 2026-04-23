@@ -3,8 +3,6 @@ name: Build img2simg.exe
 on:
   push:
     branches: [ main ]
-  pull_request:
-    branches: [ main ]
   workflow_dispatch:
 
 jobs:
@@ -13,66 +11,94 @@ jobs:
     
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
     
     - name: Set up MSYS2
       uses: msys2/setup-msys2@v2
       with:
         msystem: MINGW64
-        install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib mingw-w64-x86_64-zlib-devel
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-zlib
+          mingw-w64-x86_64-zlib-devel
+          base-devel
     
-    - name: Download AOSP source files
+    - name: Create build directory
+      run: mkdir -p ${{ github.workspace }}\build
+    
+    - name: Download source files from GitHub mirror
+      shell: powershell
+      run: |
+        $files = @(
+          'img2simg.c',
+          'sparse.c', 
+          'sparse_crc32.c',
+          'sparse.h',
+          'sparse_err.h',
+          'output_file.h'
+        )
+        
+        $baseUrl = "https://raw.githubusercontent.com/android/platform_system_core/main/libsparse"
+        
+        foreach ($file in $files) {
+          $url = "$baseUrl/$file"
+          $outputPath = "${{ github.workspace }}\build\$file"
+          Write-Host "Downloading $file from $url"
+          Invoke-WebRequest -Uri $url -OutFile $outputPath
+          Write-Host "Downloaded $file successfully"
+        }
+        
+        Get-ChildItem "${{ github.workspace }}\build" -Recurse
+    
+    - name: Compile img2simg.exe with MSYS2
       shell: msys2 {0}
       run: |
-        mkdir -p src
-        cd src
+        cd "${{ github.workspace }}/build"
         
-        # Using GitHub mirrors as fallback
-        echo "Downloading source files..."
+        # Verify files exist
+        echo "Files in build directory:"
+        ls -la
         
-        curl -L -o img2simg.c https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/img2simg.c
-        curl -L -o sparse.c https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse.c
-        curl -L -o sparse_crc32.c https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse_crc32.c
-        curl -L -o sparse.h https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse.h
-        curl -L -o sparse_err.h https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/sparse_err.h
-        curl -L -o output_file.h https://raw.githubusercontent.com/android/platform_system_core/main/libsparse/output_file.h
+        # Compile
+        gcc -v -o img2simg.exe img2simg.c sparse.c sparse_crc32.c -lz 2>&1
         
-        echo "Download complete"
-        ls -lah
-    
-    - name: Compile img2simg.exe
-      shell: msys2 {0}
-      run: |
-        cd src
-        echo "Starting compilation..."
-        gcc -Wall -Wextra -o img2simg.exe img2simg.c sparse.c sparse_crc32.c -lz
-        
+        # Check result
         if [ -f img2simg.exe ]; then
-          echo "Compilation successful!"
+          echo "✓ Compilation successful"
           ls -lh img2simg.exe
           file img2simg.exe
         else
-          echo "Compilation failed!"
+          echo "✗ Compilation failed"
           exit 1
         fi
     
     - name: Upload artifact
+      if: success()
       uses: actions/upload-artifact@v4
       with:
-        name: img2simg-windows
-        path: src/img2simg.exe
+        name: img2simg-windows-binary
+        path: ${{ github.workspace }}\build\img2simg.exe
         retention-days: 90
+        if-no-files-found: error
     
     - name: Create Release
       if: success()
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
-        files: src/img2simg.exe
-        tag_name: v1.0.0-${{ github.run_number }}
+        files: ${{ github.workspace }}\build\img2simg.exe
+        tag_name: build-${{ github.run_number }}
         body: |
-          Windows build of img2simg from AOSP
+          # img2simg.exe for Windows
           
-          Built from: https://android.googlesource.com/platform/system/core/+/main/libsparse/
+          Compiled from AOSP libsparse
+          - Source: https://android.googlesource.com/platform/system/core/+/main/libsparse/
+          - Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           
-          Build details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          **Usage:**
+          ```cmd
+          img2simg.exe input.img output.simg
+          ```
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
